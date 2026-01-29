@@ -1,9 +1,9 @@
-name: Hourly USD to CNY Rate Push   # <-- 第一行必须是 name: 或其他键，不能是 -
+name: Hourly USD to CNY Rate Push
 
 on:
   schedule:
-    - cron: '0 * * * *'          # 这里才有 -
-  workflow_dispatch:
+    - cron: '0 * * * *'          # UTC 每小时整点 ≈ 北京时间每小时整点（实际收到约 0-5 分钟延迟，很准）
+  workflow_dispatch:             # 支持手动立即测试
 
 jobs:
   push:
@@ -31,28 +31,30 @@ jobs:
 
           bark_key = os.environ.get('BARK_KEY')
           if not bark_key:
-              title = "Secret 缺失"
-              body = "BARK_KEY 未注入"
-          else:
-              try:
-                  api_url = "https://open.er-api.com/v6/latest/USD"
-                  resp = requests.get(api_url, timeout=10)
-                  data = resp.json()
-                  
-                  if data.get('result') == 'success':
-                      cny = data['rates']['CNY']
-                      rate = round(cny, 4)
-                      title = "美元汇率更新"
-                      body = f"1 USD = {rate} CNY"
-                  else:
-                      title = "API 失败"
-                      body = "获取失败"
-              except Exception as e:
-                  title = "脚本异常"
-                  body = f"错误: {str(e)[:80]}"
-          
-          sound = "minuet"
-          if bark_key:
-              bark_url = f"https://api.day.app/{bark_key}/{body}?title={title}&sound={sound}&badge=1"
-              requests.get(bark_url)
+              print("BARK_KEY 未注入，检查 GitHub Secrets")
+              exit(1)
+
+          try:
+              # 汇率 API（免费、稳定）
+              api_url = "https://open.er-api.com/v6/latest/USD"
+              resp = requests.get(api_url, timeout=10)
+              data = resp.json()
+
+              if data.get('result') == 'success':
+                  cny = data['rates']['CNY']
+                  rate = round(cny, 4)
+                  title = "美元汇率更新"
+                  body = f"1 USD = {rate} CNY"
+              else:
+                  title = "汇率 API 异常"
+                  body = "获取失败，请稍后重试"
+          except Exception as e:
+              title = "脚本错误"
+              body = f"异常: {str(e)[:60]}"
+
+          # Bark 推送
+          sound = "minuet"  # 可换成 "chime"、"bell"、"anticipate" 等你喜欢的铃声
+          bark_url = f"https://api.day.app/{bark_key}/{body}?title={title}&sound={sound}&badge=1&group=汇率&autoCopy=1"
+          requests.get(bark_url)
+          print("推送已发送:", title, "-", body)
           EOF
