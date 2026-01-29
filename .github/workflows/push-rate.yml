@@ -1,3 +1,25 @@
+name: Hourly USD to CNY Rate Push   # <-- 第一行必须是 name: 或其他键，不能是 -
+
+on:
+  schedule:
+    - cron: '0 * * * *'          # 这里才有 -
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install requests
+        run: pip install requests
+
       - name: Push USD/CNY Rate
         env:
           BARK_KEY: ${{ secrets.BARK_KEY }}
@@ -5,12 +27,12 @@
           python - << 'EOF'
           import requests
           import json
-          import os   # <--- 加这一行！！！
+          import os
 
-          bark_key = os.environ.get('BARK_KEY')  # 安全取值
+          bark_key = os.environ.get('BARK_KEY')
           if not bark_key:
               title = "Secret 缺失"
-              body = "BARK_KEY 未注入，请检查 GitHub Secrets"
+              body = "BARK_KEY 未注入"
           else:
               try:
                   api_url = "https://open.er-api.com/v6/latest/USD"
@@ -21,23 +43,16 @@
                       cny = data['rates']['CNY']
                       rate = round(cny, 4)
                       title = "美元汇率更新"
-                      body = f"1 USD = {rate} CNY (成功获取)"
+                      body = f"1 USD = {rate} CNY"
                   else:
                       title = "API 失败"
-                      body = f"API 返回: {data.get('result', '未知')}"
+                      body = "获取失败"
               except Exception as e:
                   title = "脚本异常"
-                  body = f"错误: {str(e)[:80]}..."
+                  body = f"错误: {str(e)[:80]}"
           
-          # 无论如何都推（debug）
           sound = "minuet"
           if bark_key:
               bark_url = f"https://api.day.app/{bark_key}/{body}?title={title}&sound={sound}&badge=1"
-              try:
-                  resp = requests.get(bark_url)
-                  print("Bark 响应码:", resp.status_code)
-              except Exception as push_err:
-                  print("推送失败:", str(push_err))
-          else:
-              print("无 BARK_KEY，无法推送")
+              requests.get(bark_url)
           EOF
