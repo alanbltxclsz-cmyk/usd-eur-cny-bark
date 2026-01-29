@@ -1,9 +1,9 @@
-name: Hourly USD to CNY Rate Push
+name: Hourly USD & EUR to CNY Rate Push
 
 on:
   schedule:
-    - cron: '0 * * * *'          # UTC 每小时整点 ≈ 北京时间每小时整点（实际收到约 0-5 分钟延迟，很准）
-  workflow_dispatch:             # 支持手动立即测试
+    - cron: '0 * * * *'          # UTC 每小时整点 ≈ 北京时间每小时整点（延迟小）
+  workflow_dispatch:             # 支持手动测试
 
 jobs:
   push:
@@ -20,7 +20,7 @@ jobs:
       - name: Install requests
         run: pip install requests
 
-      - name: Push USD/CNY Rate
+      - name: Push USD & EUR to CNY Rate
         env:
           BARK_KEY: ${{ secrets.BARK_KEY }}
         run: |
@@ -35,16 +35,16 @@ jobs:
               exit(1)
 
           try:
-              # 汇率 API（免费、稳定）
               api_url = "https://open.er-api.com/v6/latest/USD"
               resp = requests.get(api_url, timeout=10)
               data = resp.json()
 
               if data.get('result') == 'success':
-                  cny = data['rates']['CNY']
-                  rate = round(cny, 4)
-                  title = "美元汇率更新"
-                  body = f"1 USD = {rate} CNY"
+                  rates = data['rates']
+                  usd_cny = round(rates['CNY'], 4)
+                  eur_cny = round(rates['EUR'] ** -1 * rates['CNY'], 4)  # EUR to CNY = (1/EUR_USD) * USD_CNY
+                  title = "美元 & 欧元汇率更新"
+                  body = f"1 USD = {usd_cny} CNY\n1 EUR = {eur_cny} CNY"
               else:
                   title = "汇率 API 异常"
                   body = "获取失败，请稍后重试"
@@ -52,8 +52,8 @@ jobs:
               title = "脚本错误"
               body = f"异常: {str(e)[:60]}"
 
-          # Bark 推送
-          sound = "minuet"  # 可换成 "chime"、"bell"、"anticipate" 等你喜欢的铃声
+          # Bark 推送（多行内容用 %0A 换行，group 分组，autoCopy 自动复制）
+          sound = "minuet"
           bark_url = f"https://api.day.app/{bark_key}/{body}?title={title}&sound={sound}&badge=1&group=汇率&autoCopy=1"
           requests.get(bark_url)
           print("推送已发送:", title, "-", body)
