@@ -1,0 +1,51 @@
+name: Hourly USD/CNY Rate to Bark
+
+on:
+  schedule:
+    - cron: '0 */1 * * *'          # 每小时执行一次（UTC 时间，北京时间大概整点后几分钟）
+  workflow_dispatch:               # 允许手动触发测试
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Fetch rate and push to Bark
+        env:
+          BARK_KEY: ${{ secrets.BARK_KEY }}
+        run: |
+          python - << 'EOF'
+          import requests
+          import json
+          from datetime import datetime
+
+          # 获取汇率
+          url = "https://open.er-api.com/v6/latest/USD"
+          response = requests.get(url)
+          data = response.json()
+
+          if data.get('result') == 'success':
+              cny_rate = data['rates'].get('CNY', 0)
+              rate = round(cny_rate, 4)
+              now = datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+              
+              title = "美元兑人民币汇率更新"
+              body = f"1 USD = {rate} CNY\n更新时间: {now}"
+              
+              # Bark 推送（可自定义 sound、group 等）
+              bark_url = f"https://api.day.app/{BARK_KEY}/{body}?title={title}&sound=minuet&badge=1&group=汇率"
+              resp = requests.get(bark_url)
+              print("Bark 推送响应:", resp.text)
+          else:
+              print("获取汇率失败:", data)
+          EOF
