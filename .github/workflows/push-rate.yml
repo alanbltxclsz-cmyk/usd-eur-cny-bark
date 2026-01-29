@@ -2,8 +2,8 @@ name: Hourly USD & EUR to CNY Rate Push
 
 on:
   schedule:
-    - cron: '0 * * * *'          # UTC 每小时整点 ≈ 北京时间每小时整点
-  workflow_dispatch:
+    - cron: '15 * * * *'         # UTC 每小时15分 ≈ 北京时间每小时23分
+  workflow_dispatch:             # 支持手动立即测试
 
 jobs:
   push:
@@ -28,7 +28,7 @@ jobs:
           import requests
           import json
           import os
-          from urllib.parse import quote  # 用于 URL 编码
+          from urllib.parse import quote
 
           bark_key = os.environ.get('BARK_KEY')
           if not bark_key:
@@ -43,7 +43,6 @@ jobs:
               if data.get('result') == 'success':
                   rates = data['rates']
                   usd_cny = round(rates.get('CNY', 0), 4)
-                  # EUR to CNY: 因为 base 是 USD，所以 EUR_CNY = CNY / EUR (USD to CNY / USD to EUR)
                   eur_usd = rates.get('EUR', 0)
                   eur_cny = round(rates['CNY'] / eur_usd, 4) if eur_usd != 0 else 0
                   title = "美元 & 欧元汇率更新"
@@ -55,12 +54,10 @@ jobs:
               title = "脚本错误"
               body = f"异常: {str(e)[:60]}"
 
-          # URL 编码 title 和 body（关键修复 & 等符号）
           encoded_title = quote(title)
           encoded_body = quote(body)
 
           sound = "minuet"
-          # Bark URL：body 先（主内容），title 参数编码后
           bark_url = f"https://api.day.app/{bark_key}/{encoded_body}?title={encoded_title}&sound={sound}&badge=1&group=汇率&autoCopy=1"
           resp = requests.get(bark_url)
           print("推送请求发送，状态码:", resp.status_code)
