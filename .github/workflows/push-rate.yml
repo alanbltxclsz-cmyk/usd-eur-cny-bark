@@ -1,13 +1,14 @@
-name: Every 15 & EUR to CNY Rate Push
+name: Every 15 Min Wise USD & EUR to CNY Rate Push
 
 on:
   schedule:
-    # '*/15' 表示每隔 15 分钟触发一次 (0, 15, 30, 45分)
+    # 每 15 分钟运行一次 (0, 15, 30, 45分)
+    # 注意：GitHub 免费版 Actions 可能会有 5-10 分钟的排队延迟
     - cron: '*/15 * * * *'
-  workflow_dispatch: # 保留手动测试按钮
+  workflow_dispatch: # 支持手动点击运行测试
 
 jobs:
-  push:
+  push_rate:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,50 +22,75 @@ jobs:
       - name: Install requests
         run: pip install requests
 
-      - name: Push USD & EUR to CNY Rate
+      - name: Get Wise Rate and Push
         env:
           BARK_KEY: ${{ secrets.BARK_KEY }}
         run: |
           python - << 'EOF'
           import requests
           import os
+          from datetime import datetime, timedelta
           from urllib.parse import quote
 
+          def get_wise_rate(source, target):
+              """直接从 Wise 抓取实时中间市场汇率"""
+              try:
+                  url = f"https://wise.com/web-api/v1/rates?source={source}&target={target}"
+                  headers = {
+                      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+                      "Cache-Control": "no-cache",
+                      "Pragma": "no-cache"
+                  }
+                  # 加上随机参数防止 CDN 缓存
+                  params = {"_t": datetime.now().timestamp()}
+                  resp = requests.get(url, headers=headers, params=params, timeout=15)
+                  # Wise 返回的是列表，取第一个元素
+                  return resp.json()[0]['rate']
+              except Exception as e:
+                  print(f"Wise {source}/{target} 抓取异常: {e}")
+                  return None
+
+          # 1. 准备参数
           bark_key = os.environ.get('BARK_KEY')
           if not bark_key:
-              print("错误: BARK_KEY 未设置")
+              print("错误: 请在 GitHub Secrets 中配置 BARK_KEY")
               exit(1)
 
-          try:
-              # 获取汇率
-              api_url = "https://open.er-api.com/v6/latest/USD"
-              resp = requests.get(api_url, timeout=15)
-              data = resp.json()
+          # 获取北京时间 (UTC+8)
+          bj_time = (datetime.utcnow() + timedelta(hours=8)).strftime("%H:%M")
 
-              if data.get('result') == 'success':
-                  rates = data['rates']
-                  usd_cny = round(rates.get('CNY', 0), 4)
-                  eur_usd = rates.get('EUR', 0)
-                  # 交叉汇率计算
-                  eur_cny = round(rates['CNY'] / eur_usd, 4) if eur_usd != 0 else 0
-                  
-                  title = "实时汇率播报"
-                  body = f"🇺🇸 1 USD = {usd_cny} CNY\n🇪🇺 1 EUR = {eur_cny} CNY"
-              else:
-                  title = "汇率接口提醒"
-                  body = "数据源更新失败，请检查"
-          except Exception as e:
-              title = "脚本执行报错"
-              body = f"错误详情: {str(e)[:50]}"
+          # 2. 获取数据
+          usd_cny = get_wise_rate("USD", "CNY")
+          eur_cny = get_wise_rate("EUR", "CNY")
 
-          # 编码处理
+          # 3. 构建推送内容
+          if usd_cny and eur_cny:
+              usd_val = round(usd_cny, 4)
+              eur_val = round(eur_cny, 4)
+              title = f"Wise 汇率更新 [{bj_time}]"
+              body = f"🇺🇸 USD/CNY: {usd_val}\n🇪🇺 EUR/CNY: {eur_val}"
+              print(f"抓取成功: USD={usd_val}, EUR={eur_val}")
+          else:
+              title = "汇率抓取失败"
+              body = "Wise 接口暂时无法连接，请检查 Action 日志"
+
+          # 4. 执行推送
           encoded_title = quote(title)
           encoded_body = quote(body)
-
-          # 构建 Bark URL (将 body 放在参数中更稳定)
-          # 加上了自动复制功能(autoCopy)和分组(group)
-          bark_url = f"https://api.day.app/{bark_key}?title={encoded_title}&body={encoded_body}&sound=minuet&group=Finance&autoCopy=1"
           
-          r = requests.get(bark_url)
-          print(f"推送结果: {r.status_code}, 内容: {body}")
+          # 详解：
+          # icon: 使用 Wise 官方图标
+          # group: 分组为 Finance
+          # autoCopy: 自动复制内容到剪贴板
+          # sound: 使用 anticipate 这种清爽的提示音
+          bark_url = f"https://api.day.app/{bark_key}?title={encoded_title}&body={encoded_body}&icon=https://wise.com/images/favicons/apple-touch-icon-180x180.png&group=Finance&autoCopy=1&sound=anticipate"
+          
+          try:
+              r = requests.get(bark_url, timeout=10)
+              if r.status_code == 200:
+                  print("Bark 推送成功")
+              else:
+                  print(f"Bark 推送异常，状态码: {r.status_code}")
+          except Exception as e:
+              print(f"网络请求错误: {e}")
           EOF
