@@ -1,9 +1,11 @@
-name: Robust Real-time Rate Push
+name: Robust Real time Rate Push
 
 on:
   schedule:
+    # 每 15 分钟运行一次 (0, 15, 30, 45分)
+    # 提示：GitHub Actions 免费版可能会有几分钟的随机排队延迟
     - cron: '*/15 * * * *'
-  workflow_dispatch: 
+  workflow_dispatch: # 支持手动点击按钮立即测试
 
 jobs:
   push_rate:
@@ -22,6 +24,7 @@ jobs:
 
       - name: Get Rate and Push
         env:
+          # 这里必须与你在 Settings -> Secrets 中设置的名字完全一致
           BARK_KEY: ${{ secrets.BARK_KEY }}
           EX_KEY: ${{ secrets.EX_KEY }}
         run: |
@@ -32,9 +35,9 @@ jobs:
           from urllib.parse import quote
 
           def get_rate():
-              key = os.environ.get('EX_KEY')
-              # 该接口直接返回 USD 为基准的所有汇率
-              url = f"https://v6.exchangerate-api.com/v6/{key}/latest/USD"
+              api_key = os.environ.get('EX_KEY')
+              # 使用 ExchangeRate-API 获取以 USD 为基准的实时汇率
+              url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
               try:
                   resp = requests.get(url, timeout=20)
                   data = resp.json()
@@ -42,32 +45,25 @@ jobs:
                       rates = data['conversion_rates']
                       usd_cny = rates.get('CNY')
                       eur_usd = rates.get('EUR')
-                      # 换算 EUR/CNY
+                      # 换算 EUR 兑 CNY: (1 / EUR兑USD) * USD兑CNY
                       eur_cny = usd_cny / eur_usd if eur_usd else 0
                       return round(usd_cny, 4), round(eur_cny, 4)
+                  else:
+                      print(f"API 返回错误: {data.get('error-type')}")
               except Exception as e:
                   print(f"请求失败: {e}")
               return None, None
 
+          # 1. 初始化变量
           bark_key = os.environ.get('BARK_KEY')
+          # 获取北京时间 (UTC+8) 用于标题显示，方便确认推送新鲜度
           bj_time = (datetime.utcnow() + timedelta(hours=8)).strftime("%H:%M")
 
+          # 2. 获取数据
           usd, eur = get_rate()
 
+          # 3. 准备推送内容
           if usd and eur:
-              title = f"实时汇率 [{bj_time}]"
+              title = f"实时汇率更新 [{bj_time}]"
               body = f"🇺🇸 USD/CNY: {usd}\n🇪🇺 EUR/CNY: {eur}"
-              # 稍微加一点随机数或时间戳，防止 Bark 消息折叠
-          else:
-              title = "汇率更新失败"
-              body = "API 接口响应异常，请检查 Key 或网络"
-
-          encoded_title = quote(title)
-          encoded_body = quote(body)
-          
-          # 换了一个更显眼的图标
-          bark_url = f"https://api.day.app/{bark_key}?title={encoded_title}&body={encoded_body}&icon=https://api.iconify.design/flat-color-icons:currency-exchange.svg&group=Rate&autoCopy=1"
-          
-          requests.get(bark_url)
-          print(f"推送完成: {usd}")
-          EOF
+              print(f"成功获取: USD={usd}, EUR
