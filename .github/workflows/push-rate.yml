@@ -1,4 +1,4 @@
-name: Robust Real-time Rate Push
+name: Stable Real-time Rate Push
 
 on:
   schedule:
@@ -34,20 +34,24 @@ jobs:
 
           def get_rate():
               api_key = os.environ.get('EX_KEY')
-              url = f"https://v6.exchangerate-api.com/v6/{api_key}/latest/USD"
+              # 使用你测试成功的那个接口地址
+              url = f"http://api.exchangerate.host/live?access_key={api_key}&source=USD&currencies=CNY,EUR"
               try:
                   resp = requests.get(url, timeout=20)
                   data = resp.json()
-                  if data.get('result') == 'success':
-                      rates = data['conversion_rates']
-                      usd_cny = rates.get('CNY')
-                      eur_usd = rates.get('EUR')
-                      eur_cny = usd_cny / eur_usd if eur_usd else 0
+                  if data.get('success'):
+                      # 该接口返回的汇率在 quotes 字段下
+                      quotes = data['quotes']
+                      usd_cny = quotes.get('USDCNY')
+                      eur_usd_rate = quotes.get('USDEUR')
+                      
+                      # 计算 EUR/CNY: (1 / USDEUR) * USDCNY
+                      eur_cny = usd_cny / eur_usd_rate if eur_usd_rate else 0
                       return round(usd_cny, 4), round(eur_cny, 4)
                   else:
-                      print(f"API Error: {data.get('error-type')}")
+                      print(f"API 报错详情: {data}")
               except Exception as e:
-                  print(f"Request Failed: {e}")
+                  print(f"网络请求失败: {e}")
               return None, None
 
           bark_key = os.environ.get('BARK_KEY')
@@ -56,20 +60,22 @@ jobs:
           usd, eur = get_rate()
 
           if usd and eur:
-              title = f"实时汇率更新 [{bj_time}]"
+              title = f"汇率实时播报 [{bj_time}]"
               body = f"🇺🇸 USD/CNY: {usd}\n🇪🇺 EUR/CNY: {eur}"
-              print(f"成功获取: USD={usd}, EUR={eur}")
+              print(f"抓取成功: USD={usd}, EUR={eur}")
           else:
-              title = "汇率更新异常"
-              body = "无法从 API 获取数据，请检查 Secrets 中的 EX_KEY"
+              title = "汇率获取失败"
+              body = "API 响应异常，请检查 Actions 日志中的报错信息"
 
           encoded_title = quote(title)
           encoded_body = quote(body)
-          bark_url = f"https://api.day.app/{bark_key}?title={encoded_title}&body={encoded_body}&icon=https://api.iconify.design/flat-color-icons:currency-exchange.svg&group=Finance&autoCopy=1"
+          
+          # 推送至 Bark
+          bark_url = f"https://api.day.app/{bark_key}?title={encoded_title}&body={encoded_body}&icon=https://api.iconify.design/fc:currency-exchange.svg&group=Finance&autoCopy=1"
           
           try:
               requests.get(bark_url, timeout=10)
-              print("Bark 推送指令已发送")
+              print("推送已发送至 Bark")
           except Exception as e:
-              print(f"Push Error: {e}")
+              print(f"推送出错: {e}")
           EOF
